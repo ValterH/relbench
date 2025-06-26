@@ -133,3 +133,12 @@ register_task("rel-trial", "study-adverse", trial.StudyAdverseTask)
 register_task("rel-trial", "site-success", trial.SiteSuccessTask)
 register_task("rel-trial", "condition-sponsor-run", trial.ConditionSponsorRunTask)
 register_task("rel-trial", "site-sponsor-run", trial.SiteSponsorRunTask)
+
+
+# "synthetic" taks
+register_task("rel-f1", "driver-best-position", f1.DriverBestPositionTask)
+register_task("rel-f1", "driver-worst-position", f1.DriverWorstPositionTask)
+register_task("rel-f1", "driver-position-year", f1.DriverPositionYearTask)
+
+# synthetic dataset 
+register_task("rel-f1-synthetic", "driver-position", f1.DriverPositionTask)
