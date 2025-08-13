@@ -10,3 +10,7 @@ cache
 # pixi environments
 .pixi
 *.egg-info
+
+.vscode/
+/ckpt
+/results
