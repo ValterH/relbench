@@ -54,22 +54,6 @@ if torch.cuda.is_available():
 seed_everything(args.seed)
 
 dataset: Dataset = get_dataset(args.dataset, download=True)
-# task: EntityTask = get_task(args.dataset, args.task, download=True)
-from relbench.base.task_synthetic import SyntheticTask
-task = SyntheticTask(
-    dataset=dataset,
-    task_type=TaskType.REGRESSION,
-    entity_table="results",
-    num_layers=1,
-    channels=8,
-    num_neighbors=-1,
-    aggr="mean",
-    norm="layer",
-    # timedelta=pd.Timedelta(seconds=1),
-    temporal_strategy="uniform",
-    cache_dir=None,
-    device=device,
-)
 
 stypes_cache_path = Path(f"{args.cache_dir}/{args.dataset}/stypes.json")
 try:

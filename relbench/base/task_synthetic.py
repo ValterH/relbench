@@ -340,9 +340,13 @@ class SyntheticTask(EntityTask):
         if self.split == "test":
             pass
 
+        if self.num_neighbors == -1:
+            num_neighbors = [-1 for _ in range(self.num_layers)]
+        else:
+            num_neighbors = [int(self.num_neighbors / 2**i) for i in range(self.num_layers)]
         dataloader = NeighborLoader(
             self.data,
-            num_neighbors=[int(self.num_neighbors / 2**i) for i in range(self.num_layers)],
+            num_neighbors=num_neighbors,
             time_attr="time",
             input_nodes=table_input.nodes,
             input_time=table_input.time,
@@ -351,10 +355,9 @@ class SyntheticTask(EntityTask):
             temporal_strategy=self.temporal_strategy,
             shuffle=False,
             num_workers=0,
+            disjoint=True,
             # persistent_workers=args.num_workers > 0,
         )
-
-
 
         with torch.no_grad():
             self.model.eval()
@@ -370,7 +373,7 @@ class SyntheticTask(EntityTask):
                 pred_list.append(pred.detach().cpu())
             preds = torch.cat(pred_list, dim=0).numpy()
             if self.task_type == TaskType.REGRESSION:
-                pass # TODO: can implement some transforms if needed
+                pass # TODO: can implement additional transforms if needed
             elif self.task_type == TaskType.BINARY_CLASSIFICATION:
                 preds = (preds > preds.mean()).astype(int)
             else:
