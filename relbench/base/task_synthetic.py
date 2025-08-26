@@ -242,26 +242,6 @@ class SyntheticTask(EntityTask):
                 text_embedder=GloveTextEmbedding(device=self.device), batch_size=256
             ),
         )
-
-        import numpy as np
-        def serialize_col_stats(col_stats_dict: Dict) -> Dict:
-            col_stats_dict_serializable = {}
-            for table, stats in col_stats_dict.items():
-                col_stats_dict_serializable[table] = {}
-                for col, stat_dict in stats.items():
-                    col_stats_dict_serializable[table][col] = {}
-                    for stat_type, stat_value in stat_dict.items():
-                        col_stats_dict_serializable[table][col][stat_type.name] = stat_value
-                        if isinstance(stat_value, np.integer):
-                            col_stats_dict_serializable[table][col][stat_type.name] = int(stat_value)
-                        elif isinstance(stat_value, list):
-                            col_stats_dict_serializable[table][col][stat_type.name] = [float(v) for v in stat_value]
-                        elif isinstance(stat_value, torch.Tensor):
-                            col_stats_dict_serializable[table][col][stat_type.name] = stat_value.tolist()
-            return col_stats_dict_serializable
-        col_stats_dict_serializable = serialize_col_stats(col_stats_dict)
-        import json
-        json.dump(col_stats_dict_serializable, open("col_stats_dict_task.json", "w"), indent=2)
         
         # Create the model (random GNN)
         self.model = Model(

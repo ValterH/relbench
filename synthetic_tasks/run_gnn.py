@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 from typing import Dict
 
+import wandb
 import numpy as np
+import pandas as pd
 import torch
 from model import Model
 from text_embedder import GloveTextEmbedding
@@ -27,7 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str, default="rel-f1")
 parser.add_argument("--task", type=str, default="driver-position")
 parser.add_argument("--lr", type=float, default=0.005)
-parser.add_argument("--epochs", type=int, default=20)
+parser.add_argument("--epochs", type=int, default=40)
 parser.add_argument("--batch_size", type=int, default=128)
 parser.add_argument("--channels", type=int, default=128)
 parser.add_argument("--aggr", type=str, default="sum")
@@ -45,19 +47,25 @@ parser.add_argument(
 parser.add_argument("--pretrained-weights", action="store_true")
 parser.add_argument("--checkpoint-path", type=str, default=None)
 parser.add_argument("--multi-task", action="store_true")
+parser.add_argument("--no_wandb", action="store_true")
 args = parser.parse_args()
 
 
-device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     torch.set_num_threads(1)
 seed_everything(args.seed)
+wandb.init(
+    project="synthetic-tasks",
+    config=args,
+    mode="disabled" if args.no_wandb else "online"
+)
 
 dataset: Dataset = get_dataset(args.dataset, download=True)
 # task: EntityTask = get_task(args.dataset, args.task, download=True)
 task = SyntheticTask(
     dataset=dataset,
-    task_type=TaskType.BINARY_CLASSIFICATION,
+    task_type=TaskType.REGRESSION,
     entity_table="results",
     num_layers=1,
     channels=8,
@@ -130,7 +138,7 @@ for split in ["train", "val", "test"]:
         transform=table_input.transform,
         batch_size=args.batch_size,
         temporal_strategy=args.temporal_strategy,
-        shuffle=False,#split == "train",
+        shuffle=split == "train",
         num_workers=args.num_workers,
         persistent_workers=args.num_workers > 0,
     )
@@ -194,16 +202,16 @@ def test(loader: NeighborLoader) -> np.ndarray:
         pred_list.append(pred.detach().cpu())
     return torch.cat(pred_list, dim=0).numpy()
 
-# model = task.model.to(device)
-model = Model(
-    data=data,
-    col_stats_dict=col_stats_dict,
-    num_layers=1,  # args.num_layers,
-    channels=args.channels,
-    out_channels=out_channels,
-    aggr="mean",  # args.aggr,
-    norm="layer",
-).to(device)
+model = task.model.to(device)
+# model = Model(
+#     data=data,
+#     col_stats_dict=col_stats_dict,
+#     num_layers=1,  # args.num_layers,
+#     channels=args.channels,
+#     out_channels=out_channels,
+#     aggr="mean",  # args.aggr,
+#     norm="layer",
+# ).to(device)
 
 # if args.pretrained_weights:
 #     if args.checkpoint_path is None:
@@ -226,7 +234,7 @@ model = Model(
 #     enc_params += param.numel()
 # print(f"Froze {enc_params} parameters in the encoder")
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 state_dict = None
 best_val_metric = -math.inf if higher_is_better else math.inf
 train_metrics_list = []
@@ -235,6 +243,13 @@ for epoch in range(1, args.epochs + 1):
     train_loss = train()
     val_pred = test(loader_dict["val"])
     val_metrics = task.evaluate(val_pred, task.get_table("val"))
+    metrics_dict = {
+        "epoch": epoch,
+        "train/loss": train_loss,
+    }
+    for metric_name, metric_value in val_metrics.items():
+        metrics_dict[f"val/{metric_name}"] = metric_value
+    wandb.log(metrics_dict, step=epoch)
     print(f"Epoch: {epoch:02d}, Train loss: {train_loss}, Val metrics: {val_metrics}")
 
     if (higher_is_better and val_metrics[tune_metric] >= best_val_metric) or (
@@ -255,6 +270,7 @@ test_pred = test(loader_dict["test"])
 test_metrics = task.evaluate(test_pred)
 print(f"Best test metrics: {test_metrics}")
 
+wandb.log({f"test/{k}": v for k, v in test_metrics.items()})
 
 results_path = os.path.join(
     "results",
