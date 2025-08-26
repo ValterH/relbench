@@ -244,6 +244,7 @@ class SyntheticTask(EntityTask):
         )
         
         # Create the model (random GNN)
+        # TODO: simply this by removing torch_frame encoders
         self.model = Model(
             data=self.data,
             col_stats_dict=col_stats_dict,
@@ -263,9 +264,11 @@ class SyntheticTask(EntityTask):
         """
 
         db = self.dataset.get_db(upto_test_timestamp=split != "test")
-
+        # NOTE: (1) As opposed to with standard relbench tasks we do not move back in time here.
+        # We use the original dates (with the timedelta as the frequency) and compute a transformation
+        # of the graph at that point in time. Only after the transform, we move back in time.
         if split == "train":
-            start = self.dataset.val_timestamp - self.timedelta
+            start = self.dataset.val_timestamp
             end = db.min_timestamp
             freq = -self.timedelta
 
@@ -277,7 +280,7 @@ class SyntheticTask(EntityTask):
                     "insufficient aggregation time."
                 )
 
-            start = self.dataset.test_timestamp - self.timedelta
+            start = self.dataset.test_timestamp
             end = self.dataset.val_timestamp
             freq = -self.timedelta
 
@@ -392,6 +395,8 @@ class SyntheticTask(EntityTask):
         
         df = table.df.copy()
         df[self.target_col] = preds
+        # NOTE: (2) Now we move back in time, as opposed to with standard relbench tasks.
+        df[self.time_col] = df[self.time_col] - self.timedelta
         return Table(
             df=df,
             fkey_col_to_pkey_table={
