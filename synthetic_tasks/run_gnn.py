@@ -17,11 +17,11 @@ from torch_geometric.loader import NeighborLoader
 from torch_geometric.seed import seed_everything
 from tqdm import tqdm
 
-from relbench.base import Dataset, EntityTask, TaskType
+from relbench.base import Dataset, TaskType
 from relbench.datasets import get_dataset
 from relbench.modeling.graph import get_node_train_table_input, make_pkey_fkey_graph
 from relbench.modeling.utils import get_stype_proposal
-from relbench.tasks import get_task
+from relbench.base.task_synthetic import SyntheticTask
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str, default="rel-f1")
@@ -55,10 +55,9 @@ seed_everything(args.seed)
 
 dataset: Dataset = get_dataset(args.dataset, download=True)
 # task: EntityTask = get_task(args.dataset, args.task, download=True)
-from relbench.base.task_synthetic import SyntheticTask
 task = SyntheticTask(
     dataset=dataset,
-    task_type=TaskType.REGRESSION,
+    task_type=TaskType.BINARY_CLASSIFICATION,
     entity_table="results",
     num_layers=1,
     channels=8,
@@ -79,7 +78,7 @@ try:
         for col, stype_str in col_to_stype.items():
             col_to_stype[col] = stype(stype_str)
 except FileNotFoundError:
-    col_to_stype_dict = get_stype_proposal(dataset.get_db())
+    col_to_stype_dict = get_stype_proposal(dataset.get_db(upto_test_timestamp=False))
     Path(stypes_cache_path).parent.mkdir(parents=True, exist_ok=True)
     with open(stypes_cache_path, "w") as f:
         json.dump(col_to_stype_dict, f, indent=2, default=str)
@@ -112,7 +111,7 @@ elif task.task_type == TaskType.REGRESSION:
 elif task.task_type == TaskType.MULTILABEL_CLASSIFICATION:
     out_channels = task.num_labels
     loss_fn = BCEWithLogitsLoss()
-    tune_metric = "multilabel_auprc_macro"
+    tune_metric = "multilabel_auroc_macro"
     higher_is_better = True
 else:
     raise ValueError(f"Task type {task.task_type} is unsupported")
@@ -143,7 +142,8 @@ def train() -> float:
     loss_accum = count_accum = 0
     steps = 0
     total_steps = min(len(loader_dict["train"]), args.max_steps_per_epoch)
-    for batch in tqdm(loader_dict["train"], total=total_steps):
+    pbar = tqdm(loader_dict["train"], total=total_steps)
+    for batch in pbar:
         batch = batch.to(device)
 
         optimizer.zero_grad()
@@ -159,6 +159,7 @@ def train() -> float:
 
         loss_accum += loss.detach().item() * pred.size(0)
         count_accum += pred.size(0)
+        pbar.set_description(f"Loss: {loss_accum / count_accum:.4f}")
 
         steps += 1
         if steps > args.max_steps_per_epoch:
@@ -193,16 +194,16 @@ def test(loader: NeighborLoader) -> np.ndarray:
         pred_list.append(pred.detach().cpu())
     return torch.cat(pred_list, dim=0).numpy()
 
-model = task.model.to(device)
-# model = Model(
-#     data=data,
-#     col_stats_dict=col_stats_dict,
-#     num_layers=args.num_layers,
-#     channels=args.channels,
-#     out_channels=out_channels,
-#     aggr=args.aggr,
-#     norm="batch_norm",
-# ).to(device)
+# model = task.model.to(device)
+model = Model(
+    data=data,
+    col_stats_dict=col_stats_dict,
+    num_layers=1,  # args.num_layers,
+    channels=args.channels,
+    out_channels=out_channels,
+    aggr="mean",  # args.aggr,
+    norm="layer",
+).to(device)
 
 # if args.pretrained_weights:
 #     if args.checkpoint_path is None:
@@ -218,7 +219,14 @@ model = task.model.to(device)
 #     model.load_state_dict(torch.load(checkpoint_path, weights_only=True))
 #     model.head.reset_parameters()
 
-optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+# # freeze the encoder
+# enc_params = 0
+# for param in model.encoder.parameters():
+#     param.requires_grad = False
+#     enc_params += param.numel()
+# print(f"Froze {enc_params} parameters in the encoder")
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 state_dict = None
 best_val_metric = -math.inf if higher_is_better else math.inf
 train_metrics_list = []

@@ -77,6 +77,11 @@ class Model(torch.nn.Module):
                 for node_type in data.node_types
             },
             node_to_col_stats=col_stats_dict,
+            torch_frame_model_kwargs = {
+                "channels": 128,
+                "num_layers": 4,
+                "dropout_prob": 0.0,
+            },
         )
         self.temporal_encoder = HeteroTemporalEncoder(
             node_types=[
@@ -157,7 +162,8 @@ class Model(torch.nn.Module):
                 "id_awareness must be set True to use forward_dst_readout"
             )
         seed_time = batch[entity_table].seed_time
-        x_dict = self.encoder(batch.tf_dict)
+        with torch.no_grad():
+            x_dict = self.encoder(batch.tf_dict)
         # Add ID-awareness to the root node
         x_dict[entity_table][: seed_time.size(0)] += self.id_awareness_emb.weight
 
@@ -236,6 +242,26 @@ class SyntheticTask(EntityTask):
                 text_embedder=GloveTextEmbedding(device=self.device), batch_size=256
             ),
         )
+
+        import numpy as np
+        def serialize_col_stats(col_stats_dict: Dict) -> Dict:
+            col_stats_dict_serializable = {}
+            for table, stats in col_stats_dict.items():
+                col_stats_dict_serializable[table] = {}
+                for col, stat_dict in stats.items():
+                    col_stats_dict_serializable[table][col] = {}
+                    for stat_type, stat_value in stat_dict.items():
+                        col_stats_dict_serializable[table][col][stat_type.name] = stat_value
+                        if isinstance(stat_value, np.integer):
+                            col_stats_dict_serializable[table][col][stat_type.name] = int(stat_value)
+                        elif isinstance(stat_value, list):
+                            col_stats_dict_serializable[table][col][stat_type.name] = [float(v) for v in stat_value]
+                        elif isinstance(stat_value, torch.Tensor):
+                            col_stats_dict_serializable[table][col][stat_type.name] = stat_value.tolist()
+            return col_stats_dict_serializable
+        col_stats_dict_serializable = serialize_col_stats(col_stats_dict)
+        import json
+        json.dump(col_stats_dict_serializable, open("col_stats_dict_task.json", "w"), indent=2)
         
         # Create the model (random GNN)
         self.model = Model(
@@ -355,13 +381,14 @@ class SyntheticTask(EntityTask):
             temporal_strategy=self.temporal_strategy,
             shuffle=False,
             num_workers=0,
-            disjoint=True,
+            disjoint=False,
             # persistent_workers=args.num_workers > 0,
         )
 
         with torch.no_grad():
             self.model.eval()
             pred_list = []
+            ids = []
             for batch in tqdm(dataloader):
                 batch = batch.to(self.device)
                 pred = self.model(
@@ -371,7 +398,9 @@ class SyntheticTask(EntityTask):
 
                 pred = pred.view(-1) if pred.size(1) == 1 else pred
                 pred_list.append(pred.detach().cpu())
+                ids.append(batch[self.entity_table].n_id.detach().cpu())
             preds = torch.cat(pred_list, dim=0).numpy()
+            ids = torch.cat(ids, dim=0).numpy()
             if self.task_type == TaskType.REGRESSION:
                 pass # TODO: can implement additional transforms if needed
             elif self.task_type == TaskType.BINARY_CLASSIFICATION:
