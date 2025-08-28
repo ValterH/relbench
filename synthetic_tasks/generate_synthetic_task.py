@@ -21,14 +21,14 @@ def get_entity_tables(db: Database) -> list[str]:
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--dataset", type=str, default="rel-f1")
+parser.add_argument("--dataset", type=str, default="rel-amazon")
 parser.add_argument("--channels", type=int, default=128)
 parser.add_argument("--aggr", type=str, default="sum")
 parser.add_argument("--num_layers", type=int, default=2)
 parser.add_argument("--num_neighbors", type=int, default=128)
 parser.add_argument("--temporal_strategy", type=str, default="uniform")
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--num-tasks", type=int, default=100)
+parser.add_argument("--num-tasks", type=int, default=20) # 10 reg, 10 clf
 args = parser.parse_args()
 
 
@@ -40,7 +40,7 @@ seed_everything(args.seed)
 dataset: Dataset = get_dataset(args.dataset, download=True)
 entity_tables = get_entity_tables(dataset.get_db())
 
-for i in range(5, args.num_tasks):
+for i in range(0, args.num_tasks):
     if i >= args.num_tasks / 2:
         task_type = TaskType.REGRESSION
         task_name = f"synthetic_regression-{i - int(args.num_tasks / 2)}"
