@@ -41,9 +41,9 @@ dataset: Dataset = get_dataset(args.dataset, download=True)
 entity_tables = get_entity_tables(dataset.get_db())
 
 timedeltas = {
-    "rel-amazon": pd.Timedelta(months=3),
-    "rel-stack": pd.Timedelta(months=3),
-    "rel-trial": pd.Timedelta(months=12),
+    "rel-amazon": pd.Timedelta(days=365 // 4),
+    "rel-stack": pd.Timedelta(days=365 // 4),
+    "rel-trial": pd.Timedelta(days=365),
     "rel-f1": pd.Timedelta(days=30),
     "rel-hm": pd.Timedelta(days=30), #7
     "rel-event": pd.Timedelta(days=30), #7
