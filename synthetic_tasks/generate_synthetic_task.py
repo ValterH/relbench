@@ -40,6 +40,16 @@ seed_everything(args.seed)
 dataset: Dataset = get_dataset(args.dataset, download=True)
 entity_tables = get_entity_tables(dataset.get_db())
 
+timedeltas = {
+    "rel-amazon": pd.Timedelta(months=3),
+    "rel-stack": pd.Timedelta(months=3),
+    "rel-trial": pd.Timedelta(months=12),
+    "rel-f1": pd.Timedelta(days=30),
+    "rel-hm": pd.Timedelta(days=30), #7
+    "rel-event": pd.Timedelta(days=30), #7
+    "rel-avito": pd.Timedelta(days=4)
+}
+
 for i in range(0, args.num_tasks):
     if i >= args.num_tasks / 2:
         task_type = TaskType.REGRESSION
@@ -59,7 +69,7 @@ for i in range(0, args.num_tasks):
         num_neighbors=args.num_neighbors,
         aggr=args.aggr,
         norm="batch_norm",
-        timedelta=pd.Timedelta(days=30),
+        timedelta=timedeltas.get(args.dataset, pd.Timedelta(days=30)),
         temporal_strategy=args.temporal_strategy,
         device=device,
         db_cache_dir=os.path.expanduser(f"~/scratch/synthetic_tasks/{args.dataset}"),
