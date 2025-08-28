@@ -79,7 +79,7 @@ class Model(torch.nn.Module):
             node_to_col_stats=col_stats_dict,
             torch_frame_model_kwargs = {
                 "channels": channels,
-                "num_layers": 1,
+                "num_layers": 4,
                 "dropout_prob": 0.0,
             },
         )
