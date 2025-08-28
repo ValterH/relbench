@@ -188,6 +188,7 @@ class Model(torch.nn.Module):
 
 class SyntheticTask(EntityTask):
     timedelta = pd.Timedelta(seconds=1)
+    time_col = "timestamp"
     entity_col: str
 
     def __init__(
@@ -202,10 +203,10 @@ class SyntheticTask(EntityTask):
         norm: str = "batch_norm",
         timedelta: pd.Timedelta = pd.Timedelta(seconds=1),
         temporal_strategy: str = "uniform",
-        cache_dir: Optional[str] = None,
         device: str = "cpu",
+        db_cache_dir: Optional[str] = None
     ):
-        super().__init__(dataset, cache_dir=cache_dir)
+        super().__init__(dataset, cache_dir=None)
 
         self.task_type = task_type
         self.entity_table = entity_table
@@ -218,10 +219,18 @@ class SyntheticTask(EntityTask):
         self.temporal_strategy = temporal_strategy
         self.device = device    
 
-        db = self.dataset.get_db(upto_test_timestamp=False) # TODO: verify this is ok
+        db = self.dataset.get_db(upto_test_timestamp=False)
         entity_col = db.table_dict[entity_table].pkey_col
         self.entity_col = entity_col if entity_col is not None else "primary_key"
-        self.time_col = db.table_dict[entity_table].time_col
+        self.child_tables = []
+        for table_name, table in db.table_dict.items():
+            if table_name != self.entity_table and self.entity_table in table.fkey_col_to_pkey_table.values():
+                if table.time_col is not None:
+                    for fkey, pkey_table in table.fkey_col_to_pkey_table.items():
+                        if pkey_table == self.entity_table:
+                            self.child_tables.append((table_name, fkey, table.time_col))
+        
+        assert len(self.child_tables) > 0, f"No child tables with time column found for entity table {self.entity_table}"
 
         self.target_col = "target"  # Placeholder for target column
         
@@ -241,6 +250,7 @@ class SyntheticTask(EntityTask):
             text_embedder_cfg=TextEmbedderConfig(
                 text_embedder=GloveTextEmbedding(device=self.device), batch_size=256
             ),
+            cache_dir=db_cache_dir,
         )
         
         # Create the model (random GNN)
@@ -307,31 +317,40 @@ class SyntheticTask(EntityTask):
         
         self.split = split
         table = self.make_table(db, timestamps)
-        # FIXME: this filter could be a problem in autocomplete tasks!!
-        # table = self.filter_dangling_entities(table)
-
+        table = self.filter_dangling_entities(table)
         return table
 
     def make_train_table(self, db: Database, timestamps: "pd.Series[pd.Timestamp]") -> Table:
         entity_table = db.table_dict[self.entity_table].df  # noqa: F841
+        timestamp_df = pd.DataFrame({"timestamp": timestamps}) # noqa: F841
 
-        # Calculate minimum and maximum timestamps from timestamp_df
-        timestamp_df = pd.DataFrame({"timestamp": timestamps})
-        min_timestamp = timestamp_df["timestamp"].min()
-        max_timestamp = timestamp_df["timestamp"].max()
+        child_dfs = []
+        for child_table_name, child_fkey, child_time_col in self.child_tables: # noqa: F841
+            child_table = db.table_dict[child_table_name].df # noqa: F841
+            df = duckdb.sql(
+                f"""
+                SELECT
+                    timestamp,
+                    {self.entity_col},
+                FROM
+                    timestamp_df,
+                    entity_table,
+                WHERE
+                    EXISTS (
+                        SELECT *
+                        FROM child_table
+                        WHERE
+                            child_table.{child_fkey} = entity_table.{self.entity_col} AND
+                            {child_time_col} > timestamp - INTERVAL '{self.timedelta}' AND
+                            {child_time_col} <= timestamp
+                    )
+                """
+            ).df()
+            child_dfs.append(df)
+        df = pd.concat(child_dfs, axis=0, ignore_index=True)
+        # select unique rows
+        df = df.drop_duplicates(subset=[self.entity_col, "timestamp"])
 
-        df = duckdb.sql(
-            f"""
-            SELECT
-                entity_table.{self.time_col},
-                entity_table.{self.entity_col}
-            FROM
-                entity_table
-            WHERE
-                entity_table.{self.time_col} > '{min_timestamp}' AND
-                entity_table.{self.time_col} <= '{max_timestamp}'
-            """
-        ).df()
         return Table(
             df=df,
             fkey_col_to_pkey_table={
@@ -345,9 +364,6 @@ class SyntheticTask(EntityTask):
 
         table = self.make_train_table(db, timestamps)        
         table_input = get_node_train_table_input(table=table, task=self)
-        
-        if self.split == "test":
-            pass
 
         if self.num_neighbors == -1:
             num_neighbors = [-1 for _ in range(self.num_layers)]
