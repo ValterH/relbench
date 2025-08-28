@@ -35,7 +35,6 @@ args = parser.parse_args()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     torch.set_num_threads(1)
-seed_everything(args.seed)
 
 dataset: Dataset = get_dataset(args.dataset, download=True)
 entity_tables = get_entity_tables(dataset.get_db())
@@ -50,7 +49,8 @@ timedeltas = {
     "rel-avito": pd.Timedelta(days=4)
 }
 
-for i in range(0, args.num_tasks):
+for i in range(args.num_tasks):
+    seed_everything(args.seed + i)
     if i >= args.num_tasks / 2:
         task_type = TaskType.REGRESSION
         task_name = f"synthetic_regression-{i - int(args.num_tasks / 2)}"
